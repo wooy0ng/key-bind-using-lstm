@@ -1,0 +1,5 @@
+train:
+    data_path: 'dataset/train'
+    epoch: 10
+    lr: 1e-3
+    
