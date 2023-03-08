@@ -18,23 +18,21 @@ def main(cfg, stage='train') -> None:
         
 def train(cfg):
     '''
-    TODO: 데이터셋 제작
+    TODO: 데이터셋 제작 (O)
         - 데이터 증강 (O)
         - 데이터셋 선언 (O)
-    TODO: 
-        - 모델 제작 
-            LSTM Model
-            Binding Model
-        
+    TODO: 모델 제작 
+        - LSTM Model (O)
+        - Binding Model (O)
+    TODO: trainer 제작
+
     '''
     
-    dataset = augment_sound_data(cfg.data_path)
-    dataset = SoundDataset(dataset)
+    
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model = CryptoModel().to(device)
     model.trainer(cfg)
-    
     
     return
 
