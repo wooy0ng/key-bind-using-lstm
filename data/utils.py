@@ -66,12 +66,13 @@ def augment_sound_data(folder_path: str) -> Dict:
     
     return dataset
 
-def load_sound_data(wav_path: Union[str, List[str]], return_mel=False) -> Dict[str, List]:
-    if type(wav_path) == str:
-        paths = [wav_path]
+def load_sound_data(data_path: Union[str, List], return_mel=False) -> Dict[str, List]:
+    
+    if type(data_path) == str:
+        paths = [os.path.join(data_path, file_path) for file_path in os.listdir(data_path)]
     else:
-        paths = wav_path
-
+        paths = data_path
+        
     dataset = defaultdict(list)
     for path in paths:
         audio = whisper.load_audio(path)

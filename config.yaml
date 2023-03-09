@@ -1,6 +1,9 @@
 train:
     data_path: 'dataset/train'
-    batch_size: 1
-    epoch: 10
+    model_path: 'models/pretrained.pt'
+    batch_size: 8
+    epoch: 5
     lr: 1e-3
-    
+test:
+    data_path: 'dataset/test'
+    model_path: 'models/pretrained.pt'

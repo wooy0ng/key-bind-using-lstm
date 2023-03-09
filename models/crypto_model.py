@@ -3,11 +3,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import itertools
+import os
 
 from transformers import WhisperModel
 from torch.utils.data import DataLoader
 from data.SoundDataset import SoundDataset
-from data.utils import augment_sound_data
+from data.utils import augment_sound_data, load_sound_data
+from utils import make_random_key, bit_to_string
 
 
 class BindingModel(nn.Module):
@@ -20,11 +22,6 @@ class BindingModel(nn.Module):
         self.fc2 = nn.Linear(self.in_features*4, self.out_features)
         
         self.prelu_w = nn.Parameter(torch.Tensor(np.random.normal(0, 1, (1,))), requires_grad=True)
-        
-    def gaussian_normalization(self, x: torch.Tensor) -> torch.Tensor:
-        ''' gaussian normalization '''
-        mean, std = x.mean(dim=-1).unsqueeze(-1), x.std(dim=-1).unsqueeze(-1)
-        return (x - mean) / std
         
     def forward(self, input_features: torch.Tensor) -> torch.Tensor:
         # Layer1
@@ -40,6 +37,7 @@ class BindingModel(nn.Module):
     def device(self):
         return self.fc1.weight.device
 
+
 class LSTMModel(nn.Module):
     def __init__(self):
         super(LSTMModel, self).__init__()
@@ -49,23 +47,28 @@ class LSTMModel(nn.Module):
         
         # LSTM Layer
         self.lstm = nn.LSTM(
-            input_size=384,
-            hidden_size=384,
-            num_layers=1,
+            input_size=self.input_size,
+            hidden_size=self.hidden_size,
+            num_layers=self.num_layers,
             batch_first=True
         )
         
-    def forward(self, input_features: torch.Tensor, return_last_hidden_state=True) -> torch.Tensor:
+    def gaussian_normalization(self, x: torch.Tensor) -> torch.Tensor:
+        ''' gaussian normalization '''
+        mean, std = x.mean(dim=-1).unsqueeze(-1), x.std(dim=-1).unsqueeze(-1)
+        return (x - mean) / std
+
+    def forward(self, input_features: torch.Tensor) -> torch.Tensor:
         '''
-            return_last_hidden_state가 True이면, (b, h) 크기의 vector를 반환합니다.
-            return_last_hidden_state가 False이면, (b, s, h) 크기의 vector를 반환합니다.
+            
         '''
         h0 = torch.zeros(self.num_layers, input_features.size(0), self.hidden_size).to(self.device)
         c0 = torch.zeros(self.num_layers, input_features.size(0), self.hidden_size).to(self.device)
         
         outputs, _ = self.lstm(input_features, (h0, c0))
-        if return_last_hidden_state:
-            outputs = outputs[:, -1, :]
+        outputs = outputs[:, -1, :]
+        outputs = self.gaussian_normalization(outputs)
+            
         return outputs
     
     @property
@@ -102,11 +105,17 @@ class CryptoModel(nn.Module):
     def forward(self, input_features: torch.Tensor) -> torch.Tensor:
         input_features = self.feature_extraction(input_features)    # (b, 1500, 384)
         outputs = self.lstm_model(input_features)   # (b, 384)  
-        outputs = self.binding_model(outputs)       # (b, key_size)
         
+        # 의미없는 random noize 추가
+        if self.training:
+            fake = torch.Tensor(np.random.normal(0, 1, outputs.size())).to(self.device)
+            outputs = torch.cat([outputs, fake])
+        
+        outputs = self.binding_model(outputs)       # (b, key_size)
         return outputs
     
-    def trainer(self, cfg):
+    def trainer(self, cfg) -> None:
+        # load dataset
         dataset = augment_sound_data(cfg.data_path)
         dataset = SoundDataset(dataset)
         data_loader = DataLoader(dataset, batch_size=cfg.batch_size, shuffle=True)
@@ -120,11 +129,49 @@ class CryptoModel(nn.Module):
         # criterion
         criterion = nn.MSELoss()
         
+        # load master key
+        master_key = make_random_key(key_size=128).to(self.device, dtype=torch.float32)
+                
         for epoch in range(cfg.epoch):
             for idx, (path, inputs) in enumerate(data_loader):
                 inputs = inputs.to(self.device)
-                outputs = self(inputs)  
+                outputs = self(inputs)
+                compares = master_key.repeat(outputs.size(0), 1)
                 
-        return
-    
+                optimizer.zero_grad()
+                loss = criterion(outputs, compares)
+                loss.backward()
+                optimizer.step()
+                
+                print(f"epoch : {epoch+1} \t loss : {loss.item():.3f}")
         
+        # save model
+        self.save_model(cfg.model_path)
+    
+    @torch.no_grad()
+    def test(self, cfg) -> None:
+        self.load_state_dict(torch.load(cfg.model_path))
+        self.eval()
+        
+        # load dataset
+        dataset = load_sound_data(cfg.data_path, return_mel=True)
+        dataset = SoundDataset(dataset)
+        data_loader = DataLoader(dataset, batch_size=1, shuffle=False)
+        
+        for idx, (path, inputs) in enumerate(data_loader):
+            inputs = inputs.to(self.device)
+            predicted = self(inputs)
+            
+            predicted = torch.where(predicted < 0.5, 0, 1)
+            predicted = predicted.squeeze().cpu().detach()
+            
+            answer = make_random_key(key_size=128)
+            
+            print(f"path : ", path)
+            print(f"predicted \t : {bit_to_string(predicted)}")
+            print(f"answer \t\t : {bit_to_string(answer)}\n\n")
+            
+    
+    def save_model(self, model_path: str) -> None:
+        assert os.path.exists('models'), 'model_path error occurred'
+        torch.save(self.state_dict(), model_path)
