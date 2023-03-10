@@ -11,6 +11,9 @@ from data.SoundDataset import SoundDataset
 from data.utils import augment_sound_data, load_sound_data
 from utils import make_random_key, bit_to_string
 
+# debugging
+import pickle as pkl
+
 
 class BindingModel(nn.Module):
     def __init__(self):
@@ -18,15 +21,15 @@ class BindingModel(nn.Module):
         self.in_features = 384
         self.out_features = 128
         
-        self.fc1 = nn.Linear(self.in_features, self.in_features*4)
-        self.fc2 = nn.Linear(self.in_features*4, self.out_features)
+        self.fc1 = nn.Linear(self.in_features, self.in_features*4, bias=False)
+        self.fc2 = nn.Linear(self.in_features*4, self.out_features, bias=False)
         
         self.prelu_w = nn.Parameter(torch.Tensor(np.random.normal(0, 1, (1,))), requires_grad=True)
         
     def forward(self, input_features: torch.Tensor) -> torch.Tensor:
         # Layer1
-        outputs = F.layer_norm(input_features, normalized_shape=(input_features.size(-1), ))
-        outputs = F.prelu(self.fc1(outputs), weight=self.prelu_w)
+        # outputs = F.layer_norm(input_features, normalized_shape=(input_features.size(-1), ))
+        outputs = F.prelu(self.fc1(input_features), weight=self.prelu_w)
         outputs = F.dropout(outputs, p=0.5)
         
         # Layer2
@@ -59,16 +62,12 @@ class LSTMModel(nn.Module):
         return (x - mean) / std
 
     def forward(self, input_features: torch.Tensor) -> torch.Tensor:
-        '''
-            
-        '''
         h0 = torch.zeros(self.num_layers, input_features.size(0), self.hidden_size).to(self.device)
         c0 = torch.zeros(self.num_layers, input_features.size(0), self.hidden_size).to(self.device)
         
         outputs, _ = self.lstm(input_features, (h0, c0))
-        outputs = outputs[:, -1, :]
+        outputs = outputs[:, -1, :]     # get last hidden state
         outputs = self.gaussian_normalization(outputs)
-            
         return outputs
     
     @property
@@ -131,12 +130,15 @@ class CryptoModel(nn.Module):
         
         # load master key
         master_key = make_random_key(key_size=128).to(self.device, dtype=torch.float32)
-                
+        master_key = master_key.repeat(cfg.batch_size, 1)
+    
         for epoch in range(cfg.epoch):
             for idx, (path, inputs) in enumerate(data_loader):
                 inputs = inputs.to(self.device)
                 outputs = self(inputs)
-                compares = master_key.repeat(outputs.size(0), 1)
+                
+                fake_key = torch.randint(0, 2, size=(outputs.size(0)//2, 128)).to(self.device, dtype=torch.float32)
+                compares = torch.cat([master_key, fake_key])
                 
                 optimizer.zero_grad()
                 loss = criterion(outputs, compares)
@@ -159,6 +161,8 @@ class CryptoModel(nn.Module):
         data_loader = DataLoader(dataset, batch_size=1, shuffle=False)
         
         for idx, (path, inputs) in enumerate(data_loader):
+            print(f"path : ", path)
+            
             inputs = inputs.to(self.device)
             predicted = self(inputs)
             
@@ -167,7 +171,6 @@ class CryptoModel(nn.Module):
             
             answer = make_random_key(key_size=128)
             
-            print(f"path : ", path)
             print(f"predicted \t : {bit_to_string(predicted)}")
             print(f"answer \t\t : {bit_to_string(answer)}\n\n")
             

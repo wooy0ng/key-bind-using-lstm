@@ -25,6 +25,9 @@ def train(cfg):
     TODO: test 제작 (O)
     TODO: key가 항상 똑같은 값으로 나오는 오류 수정
     
+    이거 참고해보기
+    => https://towardsdatascience.com/one-class-neural-network-in-keras-249ff56201c0
+        => https://arxiv.org/pdf/1901.08688.pdf
     '''
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -38,4 +41,4 @@ def test(cfg):
 
 if __name__ == '__main__':
     cfg = OmegaConf.load('config.yaml')
-    main(cfg, stage='train')
+    main(cfg, stage='test')
