@@ -25,15 +25,19 @@ class BindingModel(nn.Module):
         self.fc2 = nn.Linear(self.in_features*4, self.out_features, bias=False)
         
         self.prelu_w = nn.Parameter(torch.Tensor(np.random.normal(0, 1, (1,))), requires_grad=True)
+        self.last_w = nn.Parameter(torch.Tensor(np.random.normal(0, 1, (self.out_features))), requires_grad=True)
         
     def forward(self, input_features: torch.Tensor) -> torch.Tensor:
         # Layer1
         # outputs = F.layer_norm(input_features, normalized_shape=(input_features.size(-1), ))
-        outputs = F.prelu(self.fc1(input_features), weight=self.prelu_w)
+        outputs = self.fc1(input_features)
+        outputs = F.prelu(outputs, weight=self.prelu_w)
         outputs = F.dropout(outputs, p=0.5)
         
         # Layer2
-        outputs = torch.sigmoid(self.fc2(outputs))
+        outputs = self.fc2(outputs)
+        outputs = torch.sigmoid(outputs * self.last_w)
+        outputs = F.dropout(outputs, p=0.1)
         return outputs
     
     @property
@@ -53,7 +57,8 @@ class LSTMModel(nn.Module):
             input_size=self.input_size,
             hidden_size=self.hidden_size,
             num_layers=self.num_layers,
-            batch_first=True
+            batch_first=True,
+            bias=False
         )
         
     def gaussian_normalization(self, x: torch.Tensor) -> torch.Tensor:
@@ -90,6 +95,7 @@ class CryptoModel(nn.Module):
         
         # Binding model
         self.binding_model = BindingModel().to(self.device)
+        
     
     def feature_extraction(self, input_features: torch.Tensor) -> torch.Tensor:
         input_embeds = F.gelu(self.whisper_encoder.conv1(input_features))
@@ -130,15 +136,15 @@ class CryptoModel(nn.Module):
         
         # load master key
         master_key = make_random_key(key_size=128).to(self.device, dtype=torch.float32)
-        master_key = master_key.repeat(cfg.batch_size, 1)
-    
+            
         for epoch in range(cfg.epoch):
             for idx, (path, inputs) in enumerate(data_loader):
                 inputs = inputs.to(self.device)
                 outputs = self(inputs)
                 
+                true_key = master_key.repeat(outputs.size(0)//2, 1)
                 fake_key = torch.randint(0, 2, size=(outputs.size(0)//2, 128)).to(self.device, dtype=torch.float32)
-                compares = torch.cat([master_key, fake_key])
+                compares = torch.cat([true_key, true_key])
                 
                 optimizer.zero_grad()
                 loss = criterion(outputs, compares)
