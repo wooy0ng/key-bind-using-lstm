@@ -30,7 +30,7 @@ class BindingModel(nn.Module):
         # Layer1
         # outputs = F.layer_norm(input_features, normalized_shape=(input_features.size(-1), ))
         outputs = F.prelu(self.fc1(input_features), weight=self.prelu_w)
-        outputs = F.dropout(outputs, p=0.5)
+        outputs = F.dropout(outputs, p=0.2)
         
         # Layer2
         outputs = torch.sigmoid(self.fc2(outputs))
@@ -53,7 +53,8 @@ class LSTMModel(nn.Module):
             input_size=self.input_size,
             hidden_size=self.hidden_size,
             num_layers=self.num_layers,
-            batch_first=True
+            batch_first=True,
+            bias=False
         )
         
     def gaussian_normalization(self, x: torch.Tensor) -> torch.Tensor:
@@ -67,13 +68,32 @@ class LSTMModel(nn.Module):
         
         outputs, _ = self.lstm(input_features, (h0, c0))
         outputs = outputs[:, -1, :]     # get last hidden state
-        outputs = self.gaussian_normalization(outputs)
+        # outputs = self.gaussian_normalization(outputs)
         return outputs
+    
+    def _freeze_parameters(self):
+        for param in self.parameters():
+            param.requires_grad = False
+        self._requires_grad = False
     
     @property
     def device(self) -> torch.device:
         return self.lstm.weight_hh_l0.device
 
+
+class ClassificationModel(nn.Module):
+    def __init__(self):
+        super(ClassificationModel, self).__init__()
+        self.fc = nn.Linear(384, 1)
+        
+    def forward(self, input_features: torch.Tensor) -> torch.Tensor:
+        logit = self.fc(input_features)
+        return logit
+    
+    @property
+    def device(self) -> torch.device:
+        return self.fc.weight.device
+        
 
 class CryptoModel(nn.Module):
     def __init__(self):
@@ -88,6 +108,9 @@ class CryptoModel(nn.Module):
         # LSTM model
         self.lstm_model = LSTMModel().to(self.device)
         
+        # Classification model
+        self.classification_model = ClassificationModel().to(self.device)
+        
         # Binding model
         self.binding_model = BindingModel().to(self.device)
     
@@ -101,7 +124,7 @@ class CryptoModel(nn.Module):
         hidden_states = input_embeds + embed_pos        # positional embedding
         return hidden_states
     
-    def forward(self, input_features: torch.Tensor) -> torch.Tensor:
+    def forward(self, input_features: torch.Tensor, is_classification=False) -> torch.Tensor:
         input_features = self.feature_extraction(input_features)    # (b, 1500, 384)
         outputs = self.lstm_model(input_features)   # (b, 384)  
         
@@ -110,7 +133,10 @@ class CryptoModel(nn.Module):
             fake = torch.Tensor(np.random.normal(0, 1, outputs.size())).to(self.device)
             outputs = torch.cat([outputs, fake])
         
-        outputs = self.binding_model(outputs)       # (b, key_size)
+        if is_classification is True:
+            outputs = self.classification_model(outputs)    # (b, 1)
+        else:
+            outputs = self.binding_model(outputs)           # (b, key_size)
         return outputs
     
     def trainer(self, cfg) -> None:
@@ -119,33 +145,60 @@ class CryptoModel(nn.Module):
         dataset = SoundDataset(dataset)
         data_loader = DataLoader(dataset, batch_size=cfg.batch_size, shuffle=True)
         
-        # optimizer
-        optimizer = torch.optim.Adam(
-            itertools.chain(self.lstm_model.parameters(), self.binding_model.parameters()),
-            lr=cfg.lr
+        # classification optimizer, bind optimizer
+        optimizer_C = torch.optim.Adam(
+            itertools.chain(self.lstm_model.parameters(), self.classification_model.parameters()),
+            lr=cfg.clf_lr
+        )
+        optimizer_B = torch.optim.Adam(
+            self.binding_model.parameters(),
+            lr=cfg.bind_lr
         )
         
-        # criterion
-        criterion = nn.MSELoss()
+        # classification criterion, bind criterion
+        criterion_C = nn.BCEWithLogitsLoss()
+        criterion_B = nn.MSELoss()
         
-        # load master key
+        # ---------------------------------
+        # step 1: train classification task
+        # ---------------------------------
+        for epoch in range(cfg.clf_epoch):
+            for idx, (path, inputs) in enumerate(data_loader):
+                inputs = inputs.to(self.device)
+                outputs = self(inputs, is_classification=True)
+                
+                true_label = torch.ones(size=(outputs.size(0)//2, 1)).to(self.device)
+                false_label = torch.zeros(size=(outputs.size(0)//2, 1)).to(self.device)
+                batch_label = torch.cat([true_label, false_label])
+                
+                optimizer_C.zero_grad()
+                loss = criterion_C(outputs, batch_label)
+                loss.backward()
+                optimizer_C.step()
+
+                print(f"epoch : {epoch+1} \t classification loss : {loss.item():.3f}")
+        
+        # --------------------------
+        # step 2: train binding task
+        # --------------------------
+        self.lstm_model._freeze_parameters()
         master_key = make_random_key(key_size=128).to(self.device, dtype=torch.float32)
-        master_key = master_key.repeat(cfg.batch_size, 1)
     
-        for epoch in range(cfg.epoch):
+        for epoch in range(cfg.bind_epoch):
             for idx, (path, inputs) in enumerate(data_loader):
                 inputs = inputs.to(self.device)
                 outputs = self(inputs)
                 
+                true_key = master_key.repeat(outputs.size(0)//2, 1)
                 fake_key = torch.randint(0, 2, size=(outputs.size(0)//2, 128)).to(self.device, dtype=torch.float32)
-                compares = torch.cat([master_key, fake_key])
+                compares = torch.cat([true_key, fake_key])
                 
-                optimizer.zero_grad()
-                loss = criterion(outputs, compares)
+                optimizer_B.zero_grad()
+                loss = criterion_B(outputs, compares)
                 loss.backward()
-                optimizer.step()
+                optimizer_B.step()
                 
-                print(f"epoch : {epoch+1} \t loss : {loss.item():.3f}")
+                print(f"epoch : {epoch+1} \t bind loss : {loss.item():.3f}")
         
         # save model
         self.save_model(cfg.model_path)

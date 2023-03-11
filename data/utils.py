@@ -67,7 +67,6 @@ def augment_sound_data(folder_path: str) -> Dict:
     return dataset
 
 def load_sound_data(data_path: Union[str, List], return_mel=False) -> Dict[str, List]:
-    
     if type(data_path) == str:
         paths = [os.path.join(data_path, file_path) for file_path in os.listdir(data_path)]
     else:

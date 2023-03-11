@@ -1,9 +1,12 @@
 train:
     data_path: 'dataset/train'
     model_path: 'models/pretrained.pt'
-    batch_size: 4
-    epoch: 3
-    lr: 1e-4
+    batch_size: 8
+    clf_epoch: 10
+    clf_lr: 5e-3
+
+    bind_epoch: 1
+    bind_lr: 1e-3
 test:
-    data_path: 'dataset/test_false'
+    data_path: 'dataset/test_true'
     model_path: 'models/pretrained.pt'
