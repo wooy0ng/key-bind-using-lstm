@@ -22,3 +22,8 @@ def make_random_key(key_size: int, return_negative: bool=False):
     if return_negative:
         random_key = [-1 if bit == 0 else 1 for bit in random_key]
     return torch.tensor(random_key)
+
+def bit_similarity(x: torch.Tensor, y: torch.Tensor):
+    bools = [1 if n == m else 0 for n, m in zip(x.tolist(), y.tolist())]
+    return (sum(bools) / len(bools)) * 100
+    

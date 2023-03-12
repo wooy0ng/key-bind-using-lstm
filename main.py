@@ -41,4 +41,5 @@ def test(cfg):
 
 if __name__ == '__main__':
     cfg = OmegaConf.load('config.yaml')
+    main(cfg, stage='train')
     main(cfg, stage='test')

@@ -1,9 +1,10 @@
 train:
+    klecspeech: True
     data_path: 'dataset/train'
     model_path: 'models/pretrained.pt'
-    batch_size: 4
+    batch_size: 16
     epoch: 3
-    lr: 1e-4
+    lr: 1e-3
 test:
-    data_path: 'dataset/test_false'
+    data_path: 'dataset/test_all'
     model_path: 'models/pretrained.pt'

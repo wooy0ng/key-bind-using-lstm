@@ -5,7 +5,7 @@ import torchaudio
 import numpy as np
 import torch.nn.functional as F
 
-
+from tqdm import tqdm
 from typing import Dict, List, Union, Tuple
 from torchaudio.utils import download_asset
 from audiomentations import AddGaussianNoise
@@ -66,15 +66,23 @@ def augment_sound_data(folder_path: str) -> Dict:
     
     return dataset
 
-def load_sound_data(data_path: Union[str, List], return_mel=False) -> Dict[str, List]:
+def load_klecspeech_data_path():
+    root_path = './KlecSpeech/train/wav/D01/G01'
+    paths = []
+    for directory in os.listdir(root_path):
+        paths += [os.path.join(root_path, directory, path) for path in os.listdir(Path(root_path, directory))]
+    return paths
     
+
+
+def load_sound_data(data_path: Union[str, List], return_mel=False) -> Dict[str, List]:
     if type(data_path) == str:
         paths = [os.path.join(data_path, file_path) for file_path in os.listdir(data_path)]
     else:
         paths = data_path
         
     dataset = defaultdict(list)
-    for path in paths:
+    for path in tqdm(paths, desc='load sound data', total=len(paths)):
         audio = whisper.load_audio(path)
         dataset['path'].append(path)
         dataset['audio'].append(torch.Tensor(whisper.pad_or_trim(audio)))
